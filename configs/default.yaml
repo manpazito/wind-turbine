@@ -1,0 +1,53 @@
+{
+  "airfoil": {
+    "radius": 0.22648363,
+    "axial_chord": 0.05134006,
+    "tangential_chord": 0.03934316,
+    "unguided_turning_deg": 6.686,
+    "inlet_blade_deg": 38.682,
+    "inlet_half_wedge_deg": 5.286,
+    "leading_edge_radius": 0.00724877,
+    "outlet_blade_deg": -76.584,
+    "trailing_edge_radius": 0.00246556,
+    "cascade_blade_count": 30,
+    "throat": 0.00716107,
+    "n_points": 80
+  },
+  "rotor": {
+    "radius_m": 30.0,
+    "hub_radius_ratio": 0.2,
+    "n_sections": 18,
+    "wind_speed_ms": 9.0,
+    "air_density": 1.225,
+    "dynamic_viscosity": 1.81e-5,
+    "pitch_deg": 0.0
+  },
+  "polar": {
+    "cl_alpha_per_rad": 5.73,
+    "alpha_stall_deg": 12.0,
+    "cl_max": 1.35,
+    "cd0": 0.01,
+    "induced_drag_factor": 0.012,
+    "post_stall_drag_gain": 0.02
+  },
+  "optimizer": {
+    "blade_count_candidates": [2, 3, 4, 5],
+    "aoa_deg_candidates": [4.0, 6.0, 8.0, 10.0],
+    "tip_speed_ratio_candidates": [6.0, 7.0, 8.0]
+  },
+  "surrogate": {
+    "enabled": true,
+    "n_samples": 2000,
+    "degree": 2,
+    "seed": 42,
+    "top_k_candidates": 8,
+    "population_size": 120,
+    "generations": 45
+  },
+  "output": {
+    "directory": "outputs"
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}
