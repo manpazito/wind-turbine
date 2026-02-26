@@ -71,7 +71,7 @@ How `local_sensitivity.csv` works (brief):
 - Reported derivatives (`dcp_dparam`, `droot_moment_dparam`, `dsolidity_dparam`) quantify how strongly each parameter drives performance and load near the chosen point.
 - `impact_tradeoff` ranks which parameter changes most disturb the selected Pareto compromise.
 
-## 4) Equations used (implemented)
+## 4) Equations implemented
 
 - $\lambda = \Omega R / V_{\infty}$
 - $\phi = \arctan\!\left(\frac{1-a}{\lambda_r(1+a')}\right)$
@@ -85,6 +85,14 @@ How `local_sensitivity.csv` works (brief):
 - $C_p = \frac{P}{0.5\,\rho A V_{\infty}^3}, \quad P = \Omega\int dQ$
 - $\theta(r) = \phi_{\text{des}}(r) - \alpha_{\text{design}} - \beta_{\text{pitch}}$
 - $c(r) \sim \frac{8\pi r\sin\phi_{\text{des}}}{B\,C_{l,\text{des}}\,\lambda_r}$
+
+How these equations justify the final solution (brief):
+
+- They convert each candidate design into physically grounded outputs (`Cp`, thrust/torque, root moment, solidity), not heuristic scores.
+- XFOIL provides $C_l, C_d$; BEM equations propagate those into section loads ($dT, dQ$) and rotor power $C_p$.
+- Twist and chord are justified through $\theta(r)$ and $c(r)$ relations, then validated by the resulting $\alpha(r)$, $a$, $a'$, and integrated performance.
+- Blade count and airfoil are justified by Pareto tradeoffs: maximize aerodynamic performance while limiting load/solidity.
+- The final pick is the Pareto compromise point; `local_sensitivity.csv` confirms which parameters most affect that compromise near the chosen design.
 
 ## 5) Notes
 
