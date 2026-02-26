@@ -98,3 +98,9 @@ How these equations justify the final solution (brief):
 
 - The model is aerodynamic-first. Structural, fatigue, and manufacturing constraints should be added for final engineering design.
 - Configurable ranges are in `configs/default.yaml`.
+
+## 6) Inspiration and Citation
+
+This work is heavily inspired by:
+
+Lele Li, Weihao Zhang, Ya Li, Chiju Jiang, and Yufan Wang, “Multi-Objective Optimization of Turbine Blade Profiles Based on Multi-Agent Reinforcement Learning,” *Energy Conversion and Management* 297 (2023): 117637, https://doi.org/10.1016/j.enconman.2023.117637.
