@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wind-turbine-xfoil-opt"
+version = "0.1.0"
+description = "From-scratch wind turbine blade optimization using XFOIL + BEM + NSGA-II."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "matplotlib>=3.7",
+  "pyyaml>=6.0",
+]
+
+[project.scripts]
+wt-opt = "wind_turbine.pipeline:cli"
+
+[tool.setuptools.packages.find]
+include = ["wind_turbine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

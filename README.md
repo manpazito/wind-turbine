@@ -1,99 +1,74 @@
-# Wind Turbine Design Toolkit
+# Wind Turbine Blade Optimization (From Zero)
 
-End-to-end wind turbine conceptual design workflow using:
-- Pritchard 11-parameter blade profile generation
-- BEM (Blade Element Momentum) rotor analysis
-- Surrogate model + NSGA-II style multi-objective optimization
+This project builds a full wind-turbine aerodynamic optimization model from scratch using:
 
-## 1) Prerequisites
+- `XFOIL` for airfoil polars (`Cl`, `Cd`)
+- `BEM` (Blade Element Momentum) for rotor performance
+- `NSGA-II` style multi-objective optimization
 
-- Windows PowerShell
-- Python 3.10+ (3.11 recommended)
+It optimizes and justifies:
 
-## 2) Get the code and open project folder
+- blade profile (airfoil)
+- angle of attack
+- twist distribution
+- blade number
 
-```powershell
-git clone <your-repo-url>
-cd wind-turbine
+under equations commonly used in wind-turbine research.
+
+## 1) Install
+
+```bash
+python -m pip install -r requirements.txt
 ```
 
-## 3) (Optional) Create and activate virtual environment
+Make sure `xfoil` is installed and available on your `PATH`.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+## 2) Run
+
+```bash
+python -m wind_turbine --config configs/default.yaml
 ```
 
-## 4) Install dependencies
+Preset run profiles:
 
-```powershell
-python -m pip install --upgrade pip
-python -m pip install numpy pandas matplotlib pyyaml pytest
+```bash
+# Super fast smoke test
+python -m wind_turbine --config configs/quick_test.yaml
+
+# High-accuracy (slow, much denser optimization + XFOIL sampling)
+python -m wind_turbine --config configs/high_accuracy.yaml
 ```
 
-## 5) Configure inputs
+## 3) Outputs
 
-Edit:
-- `configs/default.yaml`
+Generated in `outputs/`:
 
-Main groups:
-- `airfoil`: 11 Pritchard parameters
-- `rotor`: rotor radius, wind speed, density, sections
-- `polar`: lift/drag model settings
-- `surrogate`: dataset size, seed, optimizer settings
+- `all_designs.csv`: all evaluated designs
+- `pareto.csv`: Pareto-optimal designs
+- `best_sections.csv`: radial geometry and section aerodynamic states
+- `best_airfoil_coords.csv`: x,y coordinates of selected blade profile (normalized by chord)
+- `best_geometry.png`: chord and twist distributions
+- `best_airfoil_profile.png`: 2D airfoil/profile plot from x,y coordinates
+- `pareto_cp_vs_moment.png`: Pareto scatter
+- `summary.json`: selected best compromise design
+- `report.md`: equation-based justification for profile, AoA, twist, and blade count
 
-## 6) Run the full design pipeline
+## 4) Equations used (implemented)
 
-```powershell
-python -m windturbine.design --config configs/default.yaml
-```
+- `lambda = Omega * R / V_inf`
+- `phi = atan((1-a) / (lambda_r * (1+a')))`
+- `alpha = phi - (theta + beta_pitch)`
+- `C_n = C_l cos(phi) + C_d sin(phi)`
+- `C_t = C_l sin(phi) - C_d cos(phi)`
+- `a = 1 / ((4 F sin^2(phi))/(sigma C_n) + 1)`
+- `a' = 1 / ((4 F sin(phi)cos(phi))/(sigma C_t) - 1)`
+- `dT = 0.5 rho W^2 B c C_n dr`
+- `dQ = 0.5 rho W^2 B c C_t r dr`
+- `Cp = P / (0.5 rho A V_inf^3), P = Omega * integral(dQ)`
+- `theta(r) = phi_des(r) - alpha_design - beta_pitch`
+- `c(r) ~ 8 pi r sin(phi_des)/(B C_l,des lambda_r)`
 
-## 7) Check outputs
+## 5) Notes
 
-Generated in `.\outputs\`:
-- `airfoil_coords.csv`
-- `airfoil_plot.png`
-- `rotor_sections.csv`
-- `pareto.csv`
-- `surrogate_metrics.json`
-- `top_design_rotor_sections.csv`
-- `summary.json`
-- `report.md`
-- `twist_distribution.png`
-
-## 8) Run tests
-
-```powershell
-python -m pytest -q
-```
-
-## Notes
-
-- `TurbineBladeGen.py` is loaded from:
-  `11-Parameters-Turbine-Blade-Generator/TurbineBladeGen.py`
-- Outputs are always written to `.\outputs\`.
-
-## Acknowledgments
-
-Special thanks and credit to **David Poves** for the
-**11-Parameters Turbine Blade Generator**, which this project uses for
-Pritchard-based blade profile generation:
-- `11-Parameters-Turbine-Blade-Generator`
-
-## BSD 2-Clause License
-
-This project is licensed under the BSD 2-Clause License. See:
-- `LICENSE`
-
-## Third-Party Notice
-
-The included `11-Parameters-Turbine-Blade-Generator`
-is by **David Poves** and contains third-party code under its own license (MIT). See:
-- `11-Parameters-Turbine-Blade-Generator/LICENSE`
-
-## References
-
-- Li, L., Zhang, W., Li, Y., Jiang, C., & Wang, Y. (2023).
-  *Multi-objective optimization of turbine blade profiles based on multi-agent reinforcement learning*.
-  **Energy Conversion and Management, 297**, 117637.
-  https://doi.org/10.1016/j.enconman.2023.117637
+- The model is aerodynamic-first. Structural, fatigue, and manufacturing constraints should be added for final engineering design.
+- Configurable ranges are in `configs/default.yaml`.

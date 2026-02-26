@@ -1,0 +1,46 @@
+project:
+  output_dir: outputs_quick
+  random_seed: 42
+
+rotor:
+  radius_m: 40.0
+  wind_speed_ms: 9.0
+  air_density: 1.225
+  dynamic_viscosity: 1.81e-5
+  pitch_deg: 0.0
+  n_sections: 10
+
+design_space:
+  airfoils:
+    - "4412"
+    - "2412"
+    - "23012"
+  blades_options:
+    - 2
+    - 3
+    - 4
+  tip_speed_ratio_range: [5.0, 8.5]
+  aoa_deg_range: [4.0, 9.5]
+  hub_radius_ratio_range: [0.17, 0.26]
+  chord_scale_range: [0.85, 1.20]
+  twist_scale_range: [0.90, 1.12]
+  chord_ratio_limits: [0.020, 0.11]
+
+optimizer:
+  population_size: 16
+  generations: 4
+  crossover_probability: 0.9
+  mutation_probability: 0.25
+
+xfoil:
+  executable: xfoil
+  reynolds_bins:
+    - 250000
+    - 900000
+    - 2200000
+  alpha_start_deg: -4.0
+  alpha_end_deg: 14.0
+  alpha_step_deg: 1.0
+  ncrit: 9.0
+  max_iter: 80
+  timeout_s: 12
