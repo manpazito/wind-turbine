@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from wind_turbine.config import Config, load_config
-from wind_turbine.optimizer import OptimizationOutcome, run_nsga2, to_dataframe
+from wind_turbine.optimizer import (
+    DesignVector,
+    OptimizationOutcome,
+    evaluate_design,
+    run_nsga2,
+    to_dataframe,
+)
 from wind_turbine.report import build_report
 from wind_turbine.xfoil import XfoilPolarDatabase
 
@@ -96,7 +104,190 @@ def _plot_airfoil_profile(coords_df: pd.DataFrame, out_path: Path, title: str) -
     plt.close(fig)
 
 
-def run_pipeline(config: Config) -> dict[str, str]:
+def _objective_vector_from_eval(cp: float, root_moment_nm: float, solidity_mean: float) -> np.ndarray:
+    return np.array([-cp, root_moment_nm, solidity_mean], dtype=float)
+
+
+def _objective_distance(obj: np.ndarray, ideal: np.ndarray, nadir: np.ndarray) -> float:
+    norm = (obj - ideal) / (nadir - ideal + 1e-12)
+    return float(np.linalg.norm(norm))
+
+
+def _compute_local_sensitivity(
+    config: Config,
+    outcome: OptimizationOutcome,
+    polar_db: XfoilPolarDatabase,
+) -> pd.DataFrame:
+    base = outcome.best_compromise
+    base_design = base.design
+    base_obj = _objective_vector_from_eval(
+        cp=base.performance.cp,
+        root_moment_nm=base.performance.root_moment_nm,
+        solidity_mean=base.performance.solidity_mean,
+    )
+
+    pareto_objs = np.array([np.array(p.objectives, dtype=float) for p in outcome.pareto_front], dtype=float)
+    ideal = pareto_objs.min(axis=0)
+    nadir = pareto_objs.max(axis=0)
+    base_dist = _objective_distance(base_obj, ideal, nadir)
+
+    eval_cache: dict[tuple[int, int, float, float, float, float, float], object] = {}
+
+    def get_eval(design: DesignVector):
+        key = design.cache_key()
+        if key not in eval_cache:
+            eval_cache[key] = evaluate_design(
+                design=design,
+                rotor=config.rotor,
+                design_space=config.design_space,
+                polar_db=polar_db,
+            )
+        return eval_cache[key]
+
+    def dist_from_eval(e) -> float:
+        obj = _objective_vector_from_eval(
+            cp=e.performance.cp,
+            root_moment_nm=e.performance.root_moment_nm,
+            solidity_mean=e.performance.solidity_mean,
+        )
+        return _objective_distance(obj, ideal, nadir)
+
+    rows: list[dict[str, object]] = []
+    continuous_specs = [
+        ("tip_speed_ratio", config.design_space.tip_speed_ratio_range),
+        ("aoa_deg", config.design_space.aoa_deg_range),
+        ("hub_radius_ratio", config.design_space.hub_radius_ratio_range),
+        ("chord_scale", config.design_space.chord_scale_range),
+        ("twist_scale", config.design_space.twist_scale_range),
+    ]
+
+    for name, bounds in continuous_specs:
+        x0 = float(getattr(base_design, name))
+        step = 0.02 * float(bounds[1] - bounds[0])
+        x_minus = max(float(bounds[0]), x0 - step)
+        x_plus = min(float(bounds[1]), x0 + step)
+        if abs(x_plus - x_minus) < 1e-12:
+            continue
+
+        e_minus = get_eval(replace(base_design, **{name: x_minus}))
+        e_plus = get_eval(replace(base_design, **{name: x_plus}))
+        delta = x_plus - x_minus
+
+        dcp = (e_plus.performance.cp - e_minus.performance.cp) / delta
+        droot = (e_plus.performance.root_moment_nm - e_minus.performance.root_moment_nm) / delta
+        dsol = (e_plus.performance.solidity_mean - e_minus.performance.solidity_mean) / delta
+        dist_minus = dist_from_eval(e_minus)
+        dist_plus = dist_from_eval(e_plus)
+        ddist = (dist_plus - dist_minus) / delta
+        impact = max(abs(dist_minus - base_dist), abs(dist_plus - base_dist))
+
+        rows.append(
+            {
+                "parameter": name,
+                "type": "continuous",
+                "baseline_value": x0,
+                "step": step,
+                "dcp_dparam": dcp,
+                "droot_moment_dparam": droot,
+                "dsolidity_dparam": dsol,
+                "dtradeoff_distance_dparam": ddist,
+                "impact_tradeoff": impact,
+                "notes": "central finite difference around selected design",
+            }
+        )
+
+    blade_options = sorted(set(int(x) for x in config.design_space.blades_options))
+    base_blades = int(base_design.blades)
+    idx = blade_options.index(base_blades)
+    lower = blade_options[idx - 1] if idx - 1 >= 0 else None
+    upper = blade_options[idx + 1] if idx + 1 < len(blade_options) else None
+    if lower is not None or upper is not None:
+        if lower is not None and upper is not None:
+            e_low = get_eval(replace(base_design, blades=lower))
+            e_up = get_eval(replace(base_design, blades=upper))
+            delta = float(upper - lower)
+            dcp = (e_up.performance.cp - e_low.performance.cp) / delta
+            droot = (e_up.performance.root_moment_nm - e_low.performance.root_moment_nm) / delta
+            dsol = (e_up.performance.solidity_mean - e_low.performance.solidity_mean) / delta
+            dist_low = dist_from_eval(e_low)
+            dist_up = dist_from_eval(e_up)
+            ddist = (dist_up - dist_low) / delta
+            impact = max(abs(dist_low - base_dist), abs(dist_up - base_dist))
+            note = f"two-sided integer difference using B={lower} and B={upper}"
+        else:
+            neighbor = lower if lower is not None else upper
+            e_nb = get_eval(replace(base_design, blades=int(neighbor)))
+            delta = float(int(neighbor) - base_blades)
+            dcp = (e_nb.performance.cp - base.performance.cp) / delta
+            droot = (e_nb.performance.root_moment_nm - base.performance.root_moment_nm) / delta
+            dsol = (e_nb.performance.solidity_mean - base.performance.solidity_mean) / delta
+            dist_nb = dist_from_eval(e_nb)
+            ddist = (dist_nb - base_dist) / delta
+            impact = abs(dist_nb - base_dist)
+            note = f"one-sided integer difference using B={neighbor}"
+        rows.append(
+            {
+                "parameter": "blades",
+                "type": "integer",
+                "baseline_value": float(base_blades),
+                "step": 1.0,
+                "dcp_dparam": dcp,
+                "droot_moment_dparam": droot,
+                "dsolidity_dparam": dsol,
+                "dtradeoff_distance_dparam": ddist,
+                "impact_tradeoff": impact,
+                "notes": note,
+            }
+        )
+
+    base_airfoil_idx = int(base_design.airfoil_idx)
+    base_airfoil = config.design_space.airfoils[base_airfoil_idx]
+    alt_rows: list[dict[str, object]] = []
+    for idx_alt, airfoil in enumerate(config.design_space.airfoils):
+        if idx_alt == base_airfoil_idx:
+            continue
+        e_alt = get_eval(replace(base_design, airfoil_idx=idx_alt))
+        dist_alt = dist_from_eval(e_alt)
+        alt_rows.append(
+            {
+                "airfoil": airfoil,
+                "delta_cp": e_alt.performance.cp - base.performance.cp,
+                "delta_root_moment": e_alt.performance.root_moment_nm - base.performance.root_moment_nm,
+                "delta_solidity": e_alt.performance.solidity_mean - base.performance.solidity_mean,
+                "delta_tradeoff_distance": dist_alt - base_dist,
+                "abs_tradeoff_shift": abs(dist_alt - base_dist),
+            }
+        )
+    if alt_rows:
+        alt_df = pd.DataFrame(alt_rows)
+        best_alt = alt_df.loc[alt_df["delta_tradeoff_distance"].idxmin()]
+        max_shift = float(alt_df["abs_tradeoff_shift"].max())
+        rows.append(
+            {
+                "parameter": "airfoil",
+                "type": "categorical",
+                "baseline_value": base_airfoil,
+                "step": float("nan"),
+                "dcp_dparam": float("nan"),
+                "droot_moment_dparam": float("nan"),
+                "dsolidity_dparam": float("nan"),
+                "dtradeoff_distance_dparam": float("nan"),
+                "impact_tradeoff": max_shift,
+                "notes": (
+                    f"best alternate={best_alt['airfoil']} "
+                    f"(delta_tradeoff_distance={best_alt['delta_tradeoff_distance']:.6f}), "
+                    f"max_abs_tradeoff_shift={max_shift:.6f}"
+                ),
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    if not df.empty and "impact_tradeoff" in df.columns:
+        df = df.sort_values("impact_tradeoff", ascending=False).reset_index(drop=True)
+    return df
+
+
+def run_pipeline(config: Config) -> dict[str, object]:
     out_dir = config.project.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = out_dir / "xfoil_cache"
@@ -126,6 +317,7 @@ def run_pipeline(config: Config) -> dict[str, str]:
     pareto_png = out_dir / "pareto_cp_vs_moment.png"
     airfoil_coords_csv = out_dir / "best_airfoil_coords.csv"
     airfoil_profile_png = out_dir / "best_airfoil_profile.png"
+    sensitivity_csv = out_dir / "local_sensitivity.csv"
 
     all_df.to_csv(all_csv, index=False)
     pareto_df.to_csv(pareto_csv, index=False)
@@ -136,6 +328,8 @@ def run_pipeline(config: Config) -> dict[str, str]:
     _plot_sections(sections_df, section_png)
     _plot_pareto(pareto_df, pareto_png)
     _plot_airfoil_profile(airfoil_coords_df, airfoil_profile_png, title=f"Airfoil Profile: NACA {best.airfoil}")
+    sensitivity_df = _compute_local_sensitivity(config=config, outcome=outcome, polar_db=polar_db)
+    sensitivity_df.to_csv(sensitivity_csv, index=False)
 
     build_report(config=config, outcome=outcome, polar_db=polar_db, output_path=report_md)
 
@@ -159,6 +353,7 @@ def run_pipeline(config: Config) -> dict[str, str]:
             "pareto_csv": str(pareto_csv),
             "best_sections_csv": str(section_csv),
             "best_airfoil_coords_csv": str(airfoil_coords_csv),
+            "local_sensitivity_csv": str(sensitivity_csv),
             "report_md": str(report_md),
             "summary_json": str(summary_json),
             "geometry_plot_png": str(section_png),
